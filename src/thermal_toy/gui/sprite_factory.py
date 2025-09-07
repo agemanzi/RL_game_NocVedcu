@@ -6,6 +6,7 @@ from functools import lru_cache
 from typing import Tuple
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 
+
 # ---------- helpers ----------
 def _font(big: bool = False):
     size = 56 if big else 28
