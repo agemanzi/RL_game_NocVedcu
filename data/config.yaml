@@ -1,0 +1,24 @@
+# data/config.yaml
+dt_h: 0.25
+horizon_steps: 96
+
+# Thermal model
+C_th_kwh_per_degC: 2.0      # room thermal capacity
+U_kw_per_degC: 0.30         # heat loss coefficient
+clip_temp_c: [-10.0, 40.0]  # safety clip for Tin
+
+# Heater
+heater_pmax_kw: 3.0
+heater_eff: 1.0
+
+# Comfort
+T_in0_c: 19.0
+T_set_c: 21.0
+comfort_width_c: 2.0        # band width; no penalty inside [Tset - w/2, Tset + w/2]
+
+# Reward weights & scaling
+lambda_temp_eur_per_degCh: 2.0
+price_norm_ref_eur_per_kwh: 0.5
+
+# Reproducibility
+seed: 42
