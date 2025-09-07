@@ -114,7 +114,7 @@ def make_temp_chart_sprite(
     L, T, R, B = 50, 22, W - 12, H - 30
 
     # x-range and ticks (hours)
-    if len(hours) == 0:
+    if not hours:
         return ImageTk.PhotoImage(im)
     xmin, xmax = float(hours[0]), float(hours[-1])
     xt = _ticks_lin(0.0, 24.0, 4.0) if (xmax - xmin) >= 12 else _ticks_lin(xmin, xmax, max(1.0, (xmax - xmin) / 6))
@@ -132,19 +132,17 @@ def make_temp_chart_sprite(
     d.line([(L, yU), (R, yU)], fill=(80, 160, 80, 180), width=1)
 
     # Tin line
-    if len(tin_hist) > 0:
-        xs = [_xmap(h, xmin, xmax, L, R) for h in hours[:len(tin_hist)]]
-        ys = [_ymap(v, ymin, ymax, T, B) for v in tin_hist]
+    if tin_hist:
+        xs = [ _xmap(h, xmin, xmax, L, R) for h in hours[:len(tin_hist)] ]
+        ys = [ _ymap(v, ymin, ymax, T, B) for v in tin_hist ]
         for i in range(1, len(xs)):
-            d.line([(xs[i - 1], ys[i - 1]), (xs[i], ys[i])], fill=(30, 30, 30, 255), width=2)
+            d.line([(xs[i-1], ys[i-1]), (xs[i], ys[i])], fill=(30, 30, 30, 255), width=2)
 
     # axes and ticks
-    _draw_axes(
-        d, (L, T, R, B),
-        xticks=xt, xmin=xmin, xmax=xmax,
-        yticks=yt, ymin=ymin, ymax=ymax,
-        label_left="Tin (°C)"
-    )
+    _draw_axes(d, (L, T, R, B),
+               xticks=xt, xmin=xmin, xmax=xmax,
+               yticks=yt, ymin=ymin, ymax=ymax,
+               label_left="Tin (°C)")
 
     # cursor
     if cursor_hour is not None:
@@ -166,7 +164,7 @@ def make_price_chart_sprite(
     d = ImageDraw.Draw(im)
     L, T, R, B = 50, 18, W - 12, H - 28
 
-    if len(hours) == 0:
+    if not hours:
         return ImageTk.PhotoImage(im)
     xmin, xmax = float(hours[0]), float(hours[-1])
     ymin, ymax = _auto_minmax(price, pad_ratio=0.12, fallback=(0.0, 1.0))
@@ -177,18 +175,16 @@ def make_price_chart_sprite(
     yt = _ticks_lin(math.floor(ymin / p_step) * p_step, math.ceil(ymax / p_step) * p_step, p_step)
 
     # price line
-    if len(price) > 0:
-        xs = [_xmap(h, xmin, xmax, L, R) for h in hours]
-        ys = [_ymap(v, ymin, ymax, T, B) for v in price]
+    if price:
+        xs = [ _xmap(h, xmin, xmax, L, R) for h in hours ]
+        ys = [ _ymap(v, ymin, ymax, T, B) for v in price ]
         for i in range(1, len(xs)):
-            d.line([(xs[i - 1], ys[i - 1]), (xs[i], ys[i])], fill=(60, 120, 220, 255), width=2)
+            d.line([(xs[i-1], ys[i-1]), (xs[i], ys[i])], fill=(60, 120, 220, 255), width=2)
 
-    _draw_axes(
-        d, (L, T, R, B),
-        xticks=xt, xmin=xmin, xmax=xmax,
-        yticks=yt, ymin=ymin, ymax=ymax,
-        label_left="Price (€/kWh)"
-    )
+    _draw_axes(d, (L, T, R, B),
+               xticks=xt, xmin=xmin, xmax=xmax,
+               yticks=yt, ymin=ymin, ymax=ymax,
+               label_left="Price (€/kWh)")
 
     if cursor_hour is not None:
         cx = _xmap(cursor_hour, xmin, xmax, L, R)
@@ -210,7 +206,7 @@ def make_weather_pv_chart_sprite(
     d = ImageDraw.Draw(im)
     L, T, R, B = 50, 22, W - 50, H - 30  # leave room right for PV label
 
-    if len(hours) == 0:
+    if not hours:
         return ImageTk.PhotoImage(im)
     xmin, xmax = float(hours[0]), float(hours[-1])
 
@@ -228,24 +224,22 @@ def make_weather_pv_chart_sprite(
     # PV area (right axis scaled into same pixel rect)
     def ymapR(v: float) -> int:
         return _ymap(v, yRmin, yRmax, T, B)
-    xs = [_xmap(h, xmin, xmax, L, R) for h in hours]
-    ys_pv = [ymapR(v) for v in pv]
+    xs = [ _xmap(h, xmin, xmax, L, R) for h in hours ]
+    ys_pv = [ ymapR(v) for v in pv ]
     if len(xs) >= 2:
         poly = [(xs[0], B)] + list(zip(xs, ys_pv)) + [(xs[-1], B)]
         d.polygon(poly, fill=(255, 200, 100, 90))
 
     # Tout line (left axis)
-    ys_t = [_ymap(v, yLmin, yLmax, T, B) for v in tout]
+    ys_t = [ _ymap(v, yLmin, yLmax, T, B) for v in tout ]
     for i in range(1, len(xs)):
-        d.line([(xs[i - 1], ys_t[i - 1]), (xs[i], ys_t[i])], fill=(40, 40, 40, 255), width=2)
+        d.line([(xs[i-1], ys_t[i-1]), (xs[i], ys_t[i])], fill=(40, 40, 40, 255), width=2)
 
     # axes (left y and bottom x)
-    _draw_axes(
-        d, (L, T, R, B),
-        xticks=xt, xmin=xmin, xmax=xmax,
-        yticks=ytL, ymin=yLmin, ymax=yLmax,
-        label_left="Tout (°C)", label_right=None
-    )
+    _draw_axes(d, (L, T, R, B),
+               xticks=xt, xmin=xmin, xmax=xmax,
+               yticks=ytL, ymin=yLmin, ymax=yLmax,
+               label_left="Tout (°C)", label_right=None)
 
     # right y-axis ticks for PV
     f_tick = _font(11)
