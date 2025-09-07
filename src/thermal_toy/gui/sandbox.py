@@ -4,7 +4,6 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Optional
 
-from pathlib import Path
 import pandas as pd
 
 from ..runtime import DummySession
@@ -16,10 +15,14 @@ from .chart_sprites import (
     make_weather_pv_chart_sprite,
 )
 
+
 def time_of_day_sprite(hour: float) -> str:
-    if 6 <= hour < 11:  return "house_morning"
-    if 11 <= hour < 16: return "house_midday"
-    if 16 <= hour < 21: return "house_afternoon"
+    if 6 <= hour < 11:
+        return "house_morning"
+    if 11 <= hour < 16:
+        return "house_midday"
+    if 16 <= hour < 21:
+        return "house_afternoon"
     return "house_night"
 
 
@@ -34,7 +37,7 @@ class SandboxWindow(tk.Toplevel):
     ):
         super().__init__(master)
         self.title("Sandbox — Manual Control")
-        self.minsize(900, 860)
+        self.minsize(1040, 720)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self.session = session or DummySession()
@@ -44,10 +47,14 @@ class SandboxWindow(tk.Toplevel):
 
         # data
         self.df_day = self._load_day(self.csv_path)
-        self.hours = self.df_day.get("hour_of_day", self.df_day["t"] * float(self.df_day["dt_h"].iloc[0])).to_numpy()
+        self.hours = self.df_day.get(
+            "hour_of_day", self.df_day["t"] * float(self.df_day["dt_h"].iloc[0])
+        ).to_numpy()
         self.price = self.df_day["price_eur_per_kwh"].to_numpy()
-        self.tout  = self.df_day["t_out_c"].to_numpy()
-        self.pv    = self.df_day.get("solar_gen_kw_per_kwp", pd.Series(0, index=self.df_day.index)).to_numpy()
+        self.tout = self.df_day["t_out_c"].to_numpy()
+        self.pv = self.df_day.get(
+            "solar_gen_kw_per_kwp", pd.Series(0.0, index=self.df_day.index)
+        ).to_numpy()
 
         self.T = int(self.df_day.shape[0])
         self._tin_hist: list[float] = []
@@ -73,35 +80,53 @@ class SandboxWindow(tk.Toplevel):
         controls = ttk.Frame(bottom)
         controls.pack(side="right")
 
-        self.action_var = tk.DoubleVar(value=0.0)   # HVAC [-1, 1]
-        self.pv_on_var  = tk.BooleanVar(value=False)
-        self.soc_var    = tk.DoubleVar(value=0.5)   # Battery [0, 1]
+        self.action_var = tk.DoubleVar(value=0.0)  # HVAC [-1, 1]
+        self.pv_on_var = tk.BooleanVar(value=False)
+        self.soc_var = tk.DoubleVar(value=0.5)  # Battery [0, 1]
 
         r = 0
         ttk.Label(controls, text="HVAC u").grid(row=r, column=0, sticky="w")
         ttk.Scale(
-            controls, from_=-1.0, to=1.0, variable=self.action_var, length=320,
-            orient="horizontal", command=lambda *_: self._refresh_sprites()
+            controls,
+            from_=-1.0,
+            to=1.0,
+            variable=self.action_var,
+            length=320,
+            orient="horizontal",
+            command=lambda *_: self._refresh_sprites(),
         ).grid(row=r, column=1, columnspan=2, sticky="ew")
         r += 1
 
         ttk.Checkbutton(
-            controls, text="PV ON", variable=self.pv_on_var,
-            command=self._refresh_sprites
+            controls,
+            text="PV ON",
+            variable=self.pv_on_var,
+            command=self._refresh_sprites,
         ).grid(row=r, column=1, sticky="w")
         r += 1
 
         ttk.Label(controls, text="Battery SOC").grid(row=r, column=0, sticky="w")
         ttk.Scale(
-            controls, from_=0.0, to=1.0, variable=self.soc_var, length=320,
-            orient="horizontal", command=lambda *_: self._refresh_sprites()
+            controls,
+            from_=0.0,
+            to=1.0,
+            variable=self.soc_var,
+            length=320,
+            orient="horizontal",
+            command=lambda *_: self._refresh_sprites(),
         ).grid(row=r, column=1, columnspan=2, sticky="ew")
         r += 1
 
-        ttk.Button(controls, text="Step",  command=self._step,  width=12).grid(row=r, column=0, padx=4, pady=(6, 0))
-        self.play_btn = ttk.Button(controls, text="▶ Play", command=self._toggle_play, width=12)
+        ttk.Button(controls, text="Step", command=self._step, width=12).grid(
+            row=r, column=0, padx=4, pady=(6, 0)
+        )
+        self.play_btn = ttk.Button(
+            controls, text="▶ Play", command=self._toggle_play, width=12
+        )
         self.play_btn.grid(row=r, column=1, padx=4, pady=(6, 0))
-        ttk.Button(controls, text="Reset", command=self._reset, width=12).grid(row=r, column=2, padx=4, pady=(6, 0))
+        ttk.Button(controls, text="Reset", command=self._reset, width=12).grid(
+            row=r, column=2, padx=4, pady=(6, 0)
+        )
 
         # Footer status
         footer = ttk.Frame(root)
@@ -109,35 +134,39 @@ class SandboxWindow(tk.Toplevel):
         self.status = ttk.Label(footer, text="Ready.", anchor="w")
         self.status.pack(fill="x", pady=(6, 0))
 
-        # ---------- TOP visuals ----------
-        self.house_label = ttk.Label(root)
+        # ---------- TOP visuals in a horizontal split ----------
+        self.panes = ttk.Panedwindow(root, orient="horizontal")
+        self.panes.pack(side="top", fill="both", expand=True, pady=(0, 8))
+
+        left = ttk.Frame(self.panes, padding=(0, 0, 8, 0))
+        right = ttk.Frame(self.panes)
+
+        self.panes.add(left, weight=1)  # house + devices
+        self.panes.add(right, weight=1)  # charts
+
+        # Left pane: house background + device badges
+        self.house_label = ttk.Label(left)
         self.house_label.pack(side="top", fill="x", pady=(0, 10))
 
-        ttk.Separator(root, orient="horizontal").pack(side="top", fill="x", pady=8)
-
-        badges = ttk.Frame(root)
+        badges = ttk.Frame(left)
         badges.pack(side="top", fill="x")
-        self.hvac_label = ttk.Label(badges);  self.hvac_label.grid(row=0, column=0, padx=8, pady=6)
-        self.pv_label   = ttk.Label(badges);  self.pv_label.grid(row=0, column=1, padx=8, pady=6)
-        self.batt_label = ttk.Label(badges);  self.batt_label.grid(row=0, column=2, padx=8, pady=6)
+        self.hvac_label = ttk.Label(badges)
+        self.hvac_label.grid(row=0, column=0, padx=8, pady=6)
+        self.pv_label = ttk.Label(badges)
+        self.pv_label.grid(row=0, column=1, padx=8, pady=6)
+        self.batt_label = ttk.Label(badges)
+        self.batt_label.grid(row=0, column=2, padx=8, pady=6)
 
-        ttk.Separator(root, orient="horizontal").pack(side="top", fill="x", pady=8)
-
-        # ---------- Chart sprites (stacked) ----------
-        charts = ttk.Frame(root)
-        charts.pack(side="top", fill="both", expand=True)
-
-        self.chartA_label = ttk.Label(charts)  # Temp vs comfort
+        # Right pane: stacked chart sprites (next to the house)
+        self.chartA_label = ttk.Label(right)  # Temp vs comfort
         self.chartA_label.pack(side="top", fill="x", pady=(2, 4))
-
-        self.chartB_label = ttk.Label(charts)  # Price
+        self.chartB_label = ttk.Label(right)  # Price
         self.chartB_label.pack(side="top", fill="x", pady=(2, 4))
-
-        self.chartC_label = ttk.Label(charts)  # Weather + PV
+        self.chartC_label = ttk.Label(right)  # Weather + PV
         self.chartC_label.pack(side="top", fill="x", pady=(2, 4))
 
         # Shortcuts
-        self.bind("<space>",  lambda e: self._toggle_play())
+        self.bind("<space>", lambda e: self._toggle_play())
         self.bind("<Return>", lambda e: self._step())
         self.bind("<Escape>", lambda e: self._on_close())
 
@@ -149,7 +178,6 @@ class SandboxWindow(tk.Toplevel):
         self.playing = False
         self.play_btn.config(text="▶ Play")
 
-        # charts initial draw
         self._refresh_charts()
         self._set_readout(info)
         self._refresh_sprites()
@@ -193,8 +221,8 @@ class SandboxWindow(tk.Toplevel):
     def _set_readout(self, info: dict):
         hour = (self._k * float(self.df_day["dt_h"].iloc[0])) % 24.0
         hvac = float(self.action_var.get())
-        pv   = bool(self.pv_on_var.get())
-        soc  = float(self.soc_var.get())
+        pv = bool(self.pv_on_var.get())
+        soc = float(self.soc_var.get())
         self.readout.config(
             text=(
                 f"t = {self._k}/{self.T}  |  hour = {hour:4.2f}\n"
@@ -204,42 +232,58 @@ class SandboxWindow(tk.Toplevel):
         )
 
     def _refresh_sprites(self):
-        # background
+        # background (narrower so charts fit beside)
         hour = (self._k * float(self.df_day["dt_h"].iloc[0])) % 24.0
-        self.house_img = load_sprite(time_of_day_sprite(hour), size=(860, 260))
-        self.house_label.configure(image=self.house_img); self.house_label.image = self.house_img
+        self.house_img = load_sprite(time_of_day_sprite(hour), size=(520, 260))
+        self.house_label.configure(image=self.house_img)
+        self.house_label.image = self.house_img
 
         # device badges
-        self.hvac_img  = sprite_hvac(float(self.action_var.get()), size=(220, 220))
-        self.pv_img    = sprite_pv(bool(self.pv_on_var.get()), size=(220, 220))
-        self.batt_img  = sprite_battery(float(self.soc_var.get()), size=(220, 220))
+        self.hvac_img = sprite_hvac(float(self.action_var.get()), size=(220, 220))
+        self.pv_img = sprite_pv(bool(self.pv_on_var.get()), size=(220, 220))
+        self.batt_img = sprite_battery(float(self.soc_var.get()), size=(220, 220))
 
-        self.hvac_label.configure(image=self.hvac_img);   self.hvac_label.image = self.hvac_img
-        self.pv_label.configure(image=self.pv_img);       self.pv_label.image   = self.pv_img
-        self.batt_label.configure(image=self.batt_img);   self.batt_label.image = self.batt_img
+        self.hvac_label.configure(image=self.hvac_img)
+        self.hvac_label.image = self.hvac_img
+        self.pv_label.configure(image=self.pv_img)
+        self.pv_label.image = self.pv_img
+        self.batt_label.configure(image=self.batt_img)
+        self.batt_label.image = self.batt_img
 
     def _refresh_charts(self):
         # Current cursor hour
-        cursor_h = float(self.hours[min(self._k, len(self.hours)-1)])
+        cursor_h = float(self.hours[min(self._k, len(self.hours) - 1)])
+
+        # Sizes tuned for right pane
+        sizeA = (520, 160)
+        sizeB = (520, 120)
+        sizeC = (520, 160)
 
         # A) Temp vs comfort band
         temp_img = make_temp_chart_sprite(
-            self.hours, self._tin_hist, comfort_L=21.0-1.0, comfort_U=21.0+1.0,
-            size=(860, 180), cursor_hour=cursor_h
+            self.hours,
+            self._tin_hist,
+            comfort_L=21.0 - 1.0,
+            comfort_U=21.0 + 1.0,
+            size=sizeA,
+            cursor_hour=cursor_h,
         )
-        self.chartA_label.configure(image=temp_img); self.chartA_label.image = temp_img
+        self.chartA_label.configure(image=temp_img)
+        self.chartA_label.image = temp_img
 
         # B) Price
         price_img = make_price_chart_sprite(
-            self.hours, self.price, size=(860, 140), cursor_hour=cursor_h
+            self.hours, self.price, size=sizeB, cursor_hour=cursor_h
         )
-        self.chartB_label.configure(image=price_img); self.chartB_label.image = price_img
+        self.chartB_label.configure(image=price_img)
+        self.chartB_label.image = price_img
 
         # C) Weather + PV
         weather_img = make_weather_pv_chart_sprite(
-            self.hours, self.tout, self.pv, size=(860, 180), cursor_hour=cursor_h
+            self.hours, self.tout, self.pv, size=sizeC, cursor_hour=cursor_h
         )
-        self.chartC_label.configure(image=weather_img); self.chartC_label.image = weather_img
+        self.chartC_label.configure(image=weather_img)
+        self.chartC_label.image = weather_img
 
     def _on_close(self):
         self.playing = False
