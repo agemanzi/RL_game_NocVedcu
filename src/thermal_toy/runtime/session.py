@@ -33,29 +33,28 @@ class DummySession:
 # ------------------------------
 class GameSession:
     """
-    GUI-friendly adapter around Engine: accepts dict actions, returns flat dict info.
-    Supports runtime overrides and debug prints.
+    Thin adapter so GUI can call .reset/.step with a dict, like DummySession did,
+    but backed by the real Engine (indoor thermal balance + HVAC sizing).
     """
     def __init__(
         self,
         config_yaml_path: str = "data/config.yaml",
         day_csv_path: str = "data/day01_prices_weather.csv",
         *,
-        overrides: Optional[Dict] = None,
+        overrides: Optional[dict] = None,
         debug: bool = False,
     ):
         self._engine = None
         self._fallback = DummySession()
         self._init_error: Optional[str] = None
-        self._debug = bool(debug)
 
         try:
             from ..engine.engine import Engine  # type: ignore
             self._engine = Engine(
-                config_yaml_path,
-                day_csv_path,
+                config_yaml_path=config_yaml_path,
+                day_csv_path=day_csv_path,
                 overrides=overrides or {},
-                debug=self._debug,
+                debug=bool(debug),
             )
         except Exception as e:  # pragma: no cover
             self._engine = None
@@ -73,16 +72,9 @@ class GameSession:
     def step(self, action: Dict[str, Any] | None = None) -> Dict[str, Any]:
         if self._engine is None:
             return self._fallback.step(action)
-        from ..engine.types import Action  # local import remains lightweight
+        from ..engine.types import Action  # local import keeps this module lightweight
         u = float(action.get("u", 0.0)) if action else 0.0
         tick = self._engine.step(Action(hvac_u=u))
-        # Optional GUI-side echo
-        if self._debug:
-            i = tick.info
-            print(
-                f"[GUI] k={i['t']:02d} u={u:+.2f} Tin={i['Tin_c']:.2f} Tout={i['Tout_c']:.2f} "
-                f"q={i['q_heat_kw']:+.2f} P={i['elec_power_kw']:.2f} price={i['price_eur_per_kwh']:.3f}"
-            )
         return self._flatten(tick)
 
     @staticmethod
