@@ -21,7 +21,7 @@ class Engine:
         debug: bool = False,
     ):
         self.scenario, self.th_params, self.rw_params = build_scenario(
-            config_yaml_path, day_csv_path, enforce_horizon=True
+            config_yaml_path, day_csv_path, enforce_horizon=False
         )
         cfg = load_config_yaml(config_yaml_path)
         ov = overrides or {}
@@ -111,6 +111,14 @@ class Engine:
         if self.debug:
             print(f"[Engine] k={k} u={u:+.2f} Tout={Tout:.2f} Tin={Tin:.2f}->{Tin_next:.2f} "
                   f"q={q_hvac_kw:+.2f}kW P={elec_power_kw:.2f}kW price={price:.3f}€ J={-r:.3f}€")
+        if self.debug:
+            print("=" * 60)
+            
+            print(f"[Engine] Step {k} | u={u:+.2f}")
+            print(f"  Tin: {Tin:.2f}°C → {Tin_next:.2f}°C | dT = {dT:.4f}°C")
+            print(f"  Tout: {Tout:.2f}°C | q_loss = {q_loss_kw:+.2f} kW | q_hvac = {q_hvac_kw:+.2f} kW")
+            print(f"  Elec: {elec_power_kw:.2f} kW → {elec_energy_kwh:.3f} kWh | Price = {price:.3f} €/kWh")
+            print(f"  Reward: {r:+.4f} | Cost: {info_r['cost_eur_step']:.4f} | Penalty: {info_r['comfort_penalty_eur_step']:.4f}")
 
         return self._build_tickinfo(
             last_elec_energy_kwh=elec_energy_kwh,

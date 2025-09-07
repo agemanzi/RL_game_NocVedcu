@@ -28,3 +28,4 @@ def load_sprite(name: str, size: Tuple[int, int] | None = None) -> ImageTk.Photo
     if size is not None:
         img = img.resize(size, Image.LANCZOS)
     return ImageTk.PhotoImage(img)
+

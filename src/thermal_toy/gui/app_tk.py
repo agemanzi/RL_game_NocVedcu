@@ -67,23 +67,12 @@ class WelcomeApp:
 
     # ---------- Actions ----------
     def _start_sandbox(self):
-        # Engine-backed session with overrides + debug
-        session = GameSession(
-            config_yaml_path="data/config.yaml",
-            day_csv_path=self.options.csv_path,
-            overrides=self.options.as_overrides(),
-            debug=self.options.debug,
-        )
         from .sandbox import SandboxWindow
-        SandboxWindow(
-            self.root,
-            session=session,
-            dt_h=0.25,
-            **self.options.as_sandbox_kwargs(),  # csv_path, game_days, preview_days, speed_ms
-        )
-        dbg = " (debug ON)" if self.options.debug else ""
+        opts = self.options
+        SandboxWindow(self.root, **opts.as_sandbox_kwargs())
+        dbg = " (debug ON)" if opts.debug else ""
         self.status.config(
-            text=f"Sandbox: {self.options.game_days}d, preview={self.options.preview_days}d, speed={self.options.speed_ms}ms{dbg}"
+            text=f"Sandbox: {opts.game_days}d, preview={opts.preview_days}d, speed={opts.speed_ms}ms{dbg}"
         )
 
     def _start_rl_demo(self):

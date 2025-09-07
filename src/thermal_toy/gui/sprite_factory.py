@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Tuple
 from PIL import Image, ImageDraw, ImageFont, ImageTk
+from .assets import load_sprite  # already present
+from .assets import _candidate_dirs  # to help locate asset manually
 
 
 # ---------- helpers ----------
@@ -159,3 +161,64 @@ def sprite_battery(soc01: float, size: Tuple[int, int] = (200, 200)) -> ImageTk.
     pw, ph = _text_size(d, pct, f)
     d.text((x0 + (bw - pw) // 2, y0 + (bh - ph) // 2), pct, fill=(0, 0, 0, 230), font=f)
     return ImageTk.PhotoImage(im)
+
+# src/thermal_toy/gui/sprite_factory.py
+
+@lru_cache(maxsize=256)
+def sprite_house_with_temp(
+    sprite_name: str,
+    tin_c: float,
+    tout_c: float,
+    size: Tuple[int, int] = (460, 260),
+    lines: tuple | list | None = None,   # <- NEW
+) -> ImageTk.PhotoImage:
+    """Overlay status (top-left) and Tin/Tout (bottom-right) on house image."""
+    stem = sprite_name if sprite_name.lower().endswith(".png") else f"{sprite_name}.png"
+    sprite_path = None
+    for base in _candidate_dirs():
+        p = base / stem
+        if p.exists():
+            sprite_path = p
+            break
+    if sprite_path is None:
+        raise FileNotFoundError(f"Could not find sprite '{sprite_name}' in any asset directory.")
+
+    img = Image.open(sprite_path).convert("RGBA").resize(size)
+    draw = ImageDraw.Draw(img)
+    font = _font(False)
+    w, h = size
+    pad = 12
+
+    # --- top-left multi-line overlay (NEW) ---
+    if lines:
+        # measure
+        maxw = 0; totalh = 0; gap = 4
+        sizes = []
+        for s in lines:
+            tw, th = _text_size(draw, str(s), font)
+            sizes.append((tw, th))
+            maxw = max(maxw, tw)
+            totalh += th + gap
+        totalh -= gap
+        box_w = maxw + 2*pad
+        box_h = totalh + 2*pad
+        draw.rectangle([pad, pad, pad + box_w, pad + box_h], fill=(0, 0, 0, 150))
+        y = pad + (box_h - 2*pad - totalh) // 2
+        for (s, (tw, th)) in zip(lines, sizes):
+            draw.text((pad + (box_w - 2*pad - tw)//2 + pad//2, y), str(s), font=font, fill=(255, 255, 255, 230))
+            y += th + gap
+
+    # --- bottom-right Tin/Tout box (kept) ---
+    labels = [f"Tin: {tin_c:.1f}°C", f"Tout: {tout_c:.1f}°C"]
+    sizes2 = [_text_size(draw, lab, font) for lab in labels]
+    tw_max = max(tw for tw, _ in sizes2)
+    th_sum = sum(th for _, th in sizes2) + 6
+    bx_w = tw_max + 2*pad; bx_h = th_sum + 2*pad
+    bx_x1 = w - bx_w - pad; bx_y1 = h - bx_h - pad
+    draw.rectangle([bx_x1, bx_y1, bx_x1 + bx_w, bx_y1 + bx_h], fill=(0, 0, 0, 140))
+    y = bx_y1 + pad
+    for (lab, (tw, th)) in zip(labels, sizes2):
+        draw.text((bx_x1 + (bx_w - tw)//2, y), lab, font=font, fill=(255, 255, 255, 255))
+        y += th + 6
+
+    return ImageTk.PhotoImage(img)
