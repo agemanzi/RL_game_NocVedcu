@@ -1,3 +1,6 @@
-from .session import DummySession
+from .session import GameSession
+__all__ = ["GameSession"]
 
-__all__ = ["DummySession"]
+
+# from .dummy_session import DummySession
+# __all__.append("DummySession")

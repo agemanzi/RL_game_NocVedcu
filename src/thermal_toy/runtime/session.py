@@ -1,16 +1,13 @@
-# src/thermal_toy/runtime/session.py
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
-
+# ------------------------------
+# Legacy dummy session (kept)
+# ------------------------------
 @dataclass
 class DummySession:
-    """
-    Placeholder session until the real Env is wired.
-    Keep method names stable so GUI code doesn’t churn later.
-    """
     step_idx: int = 0
     state: Dict[str, Any] = field(default_factory=lambda: {"Tin_c": 21.0})
 
@@ -21,7 +18,6 @@ class DummySession:
 
     def step(self, action: Dict[str, float] | None = None) -> Dict[str, Any]:
         self.step_idx += 1
-        # noop: just bounce Tin a tiny bit for fun
         self.state["Tin_c"] = 21.0 + 0.25 * ((self.step_idx % 8) - 4)
         return self.info()
 
@@ -29,5 +25,75 @@ class DummySession:
         return {
             "t": self.step_idx,
             "Tin_c": round(self.state["Tin_c"], 2),
-            "note": "Dummy session — replace with ThermalPlantEnv later.",
+            "note": "Dummy session — replace with GameSession (engine) when ready.",
         }
+
+# ------------------------------
+# Engine-backed session (new)
+# ------------------------------
+class GameSession:
+    """
+    GUI-friendly adapter around Engine: accepts dict actions, returns flat dict info.
+    Supports runtime overrides and debug prints.
+    """
+    def __init__(
+        self,
+        config_yaml_path: str = "data/config.yaml",
+        day_csv_path: str = "data/day01_prices_weather.csv",
+        *,
+        overrides: Optional[Dict] = None,
+        debug: bool = False,
+    ):
+        self._engine = None
+        self._fallback = DummySession()
+        self._init_error: Optional[str] = None
+        self._debug = bool(debug)
+
+        try:
+            from ..engine.engine import Engine  # type: ignore
+            self._engine = Engine(
+                config_yaml_path,
+                day_csv_path,
+                overrides=overrides or {},
+                debug=self._debug,
+            )
+        except Exception as e:  # pragma: no cover
+            self._engine = None
+            self._init_error = f"{e.__class__.__name__}: {e}"
+
+    def reset(self) -> Dict[str, Any]:
+        if self._engine is None:
+            info = self._fallback.reset()
+            if self._init_error:
+                info["engine_init_error"] = self._init_error
+            return info
+        tick = self._engine.reset()
+        return self._flatten(tick)
+
+    def step(self, action: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        if self._engine is None:
+            return self._fallback.step(action)
+        from ..engine.types import Action  # local import remains lightweight
+        u = float(action.get("u", 0.0)) if action else 0.0
+        tick = self._engine.step(Action(hvac_u=u))
+        # Optional GUI-side echo
+        if self._debug:
+            i = tick.info
+            print(
+                f"[GUI] k={i['t']:02d} u={u:+.2f} Tin={i['Tin_c']:.2f} Tout={i['Tout_c']:.2f} "
+                f"q={i['q_heat_kw']:+.2f} P={i['elec_power_kw']:.2f} price={i['price_eur_per_kwh']:.3f}"
+            )
+        return self._flatten(tick)
+
+    @staticmethod
+    def _flatten(tick) -> Dict[str, Any]:
+        d = dict(tick.info)
+        d.update({
+            "reward": float(tick.reward),
+            "hour": float(tick.obs.hour_frac),
+            "terminated": bool(tick.terminated),
+            "truncated": bool(tick.truncated),
+        })
+        return d
+
+__all__ = ["DummySession", "GameSession"]

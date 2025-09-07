@@ -6,7 +6,12 @@ from typing import Optional
 
 import pandas as pd
 
-from ..runtime import DummySession
+# from ..runtime import DummySession
+# - from ..runtime import DummySession
+from ..runtime import GameSession as DummySession  # keep existing name usage
+
+
+
 from .assets import load_sprite
 from .sprite_factory import sprite_hvac, sprite_pv, sprite_battery
 from .chart_sprites import (

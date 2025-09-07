@@ -4,8 +4,9 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-from ..runtime.session import DummySession
+from ..runtime.session import DummySession, GameSession
 from .theming import apply_theme
+from .options import GuiOptions, edit_options
 
 
 class WelcomeApp:
@@ -13,7 +14,10 @@ class WelcomeApp:
         self.root = root or tk.Tk()
         self.root.title("Smart Household — Toy RL Game")
         self.root.minsize(720, 420)
+
+        # keep a dummy around just in case, but Sandbox will get a GameSession
         self.session = DummySession()
+        self.options = GuiOptions()  # holds sizing, COPs, debug flag, simple budget
 
         apply_theme(self.root)
         self._build()
@@ -63,7 +67,7 @@ class WelcomeApp:
 
         self.btn_play = ttk.Button(btns, text="▶  Open Sandbox", command=self._start_sandbox, width=24)
         self.btn_demo = ttk.Button(btns, text="🤖 Quick RL Demo (stub)", command=self._start_rl_demo, width=24)
-        self.btn_opts = ttk.Button(btns, text="⚙  Options (stub)", command=self._open_options, width=24)
+        self.btn_opts = ttk.Button(btns, text="⚙  Options", command=self._open_options, width=24)
         self.btn_quit = ttk.Button(btns, text="✖  Quit", command=self.root.quit, width=24)
 
         for i, b in enumerate([self.btn_play, self.btn_demo, self.btn_opts, self.btn_quit]):
@@ -74,9 +78,9 @@ class WelcomeApp:
             body,
             text=(
                 "Welcome! This is just the front door.\n"
-                "• Sandbox: manual control one step at a time.\n"
+                "• Sandbox: manual control one step at a time (now uses engine).\n"
                 "• RL Demo: placeholder that will run a pre-trained policy.\n"
-                "• Options: choose devices & budgets (later).\n\n"
+                "• Options: set HVAC size/COPs, PV/Battery and enable debug prints.\n\n"
                 "Press Enter to open the Sandbox, Esc to quit."
             ),
             style="Body.TLabel",
@@ -93,11 +97,19 @@ class WelcomeApp:
         )
         self.status.pack(fill="x", pady=(16, 0))
 
-    # ---------- Actions (stubs for now) ----------
+    # ---------- Actions ----------
     def _start_sandbox(self):
+        # Build an engine-backed session with current options (overrides) and debug toggle
+        session = GameSession(
+            config_yaml_path="data/config.yaml",
+            day_csv_path="data/day01_prices_weather.csv",
+            overrides=self.options.as_overrides(),
+            debug=self.options.debug,
+        )
         from .sandbox import SandboxWindow
-        SandboxWindow(self.root)     # opens the 1-day loop with images
-        self.status.config(text="Sandbox opened.")
+        SandboxWindow(self.root, session=session, dt_h=0.25, csv_path="data/day01_prices_weather.csv")
+        dbg = " (debug ON)" if self.options.debug else ""
+        self.status.config(text=f"Sandbox opened with HP={self.options.hvac_heat_kw:.1f} kW_th / COP={self.options.cop_heat:.1f}{dbg}")
 
     def _start_rl_demo(self):
         self.status.config(text="Running RL demo… (stub)")
@@ -108,11 +120,10 @@ class WelcomeApp:
         )
 
     def _open_options(self):
-        self.status.config(text="Options (stub)")
-        messagebox.showinfo(
-            "Options",
-            "Future: pick devices, power caps, comfort band, and budgets.",
-        )
+        def _applied(opts: GuiOptions):
+            eur = opts.budget_eur()
+            self.status.config(text=f"Options applied — budget≈{eur:,.0f} €".replace(",", " "))
+        edit_options(self.root, self.options, on_apply=_applied)
 
     def _toggle_fullscreen(self):
         fs = self.root.attributes("-fullscreen")
