@@ -163,7 +163,6 @@ def sprite_battery(soc01: float, size: Tuple[int, int] = (200, 200)) -> ImageTk.
     return ImageTk.PhotoImage(im)
 
 # src/thermal_toy/gui/sprite_factory.py
-
 @lru_cache(maxsize=256)
 def sprite_house_with_temp(
     sprite_name: str,
