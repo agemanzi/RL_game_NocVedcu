@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import math
 from dataclasses import dataclass
 from functools import lru_cache
@@ -6,19 +7,28 @@ from typing import Tuple, Iterable
 
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 
-from .assets import load_sprite  # already present
-from .assets import _candidate_dirs  # to help locate asset manually
-from .house_spline_runtime import render_house_png  # <-- NEW: use PNG+tint renderer
+# Import the image renderer; we wrap it to return a Tk PhotoImage
+from .house_spline_runtime import render_house_png
+
+__all__ = ["sprite_pv", "sprite_hvac", "sprite_battery", "sprite_house_from_png"]
 
 
 # ---------- helpers ----------
 def _font(big: bool = False):
     size = 56 if big else 28
     for name in ("Segoe UI Semibold", "Segoe UI", "Arial", "DejaVuSans"):
-        # try with and without .ttf
         for candidate in (name, name + ".ttf"):
             try:
                 return ImageFont.truetype(candidate, size)
+            except Exception:
+                pass
+    return ImageFont.load_default()
+
+def _font_px(px: int) -> ImageFont.ImageFont:
+    for name in ("Segoe UI", "SegoeUI", "Arial", "DejaVuSansMono", "DejaVuSans"):
+        for cand in (name, f"{name}.ttf"):
+            try:
+                return ImageFont.truetype(cand, px)
             except Exception:
                 pass
     return ImageFont.load_default()
@@ -28,19 +38,19 @@ def _rounded_panel(size: Tuple[int, int], bg: Tuple[int, int, int], radius: int 
     im = Image.new("RGBA", size, (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
     try:
-        d.rounded_rectangle([0, 0, w - 1, h - 1], radius=radius, fill=bg, outline=(255, 255, 255, 160), width=3)
+        d.rounded_rectangle([0, 0, w - 1, h - 1], radius=radius,
+                            fill=bg, outline=(255, 255, 255, 160), width=3)
     except Exception:
         d.rectangle([0, 0, w - 1, h - 1], fill=bg, outline=(255, 255, 255, 160), width=3)
     return im, d
 
 def _text_size(draw: ImageDraw.ImageDraw, text: str, font) -> Tuple[int, int]:
-    """Pillow 10+ compatible text measure."""
     try:
         l, t, r, b = draw.textbbox((0, 0), text, font=font)
         return r - l, b - t
     except Exception:
         try:
-            return font.getsize(text)  # older Pillow fallback
+            return font.getsize(text)
         except Exception:
             return (len(text) * 8, 16)
 
@@ -61,7 +71,7 @@ class Palette:
 PALETTE = Palette()
 
 
-# ---------- sprites ----------
+# ---------- device sprites ----------
 @lru_cache(maxsize=256)
 def sprite_pv(on: bool, size: Tuple[int, int] = (200, 200)) -> ImageTk.PhotoImage:
     bg = PALETTE.green if on else PALETTE.gray
@@ -71,11 +81,13 @@ def sprite_pv(on: bool, size: Tuple[int, int] = (200, 200)) -> ImageTk.PhotoImag
 
     # sun
     sun_cx, sun_cy, sun_r = int(w * 0.28), int(h * 0.28), int(min(w, h) * 0.12)
-    d.ellipse([sun_cx - sun_r, sun_cy - sun_r, sun_cx + sun_r, sun_cy + sun_r], fill=(255, 240, 150, 240))
+    d.ellipse([sun_cx - sun_r, sun_cy - sun_r, sun_cx + sun_r, sun_cy + sun_r],
+              fill=(255, 240, 150, 240))
     for a in range(0, 360, 30):
         dx = int(sun_r * 1.6 * math.cos(math.radians(a)))
         dy = int(sun_r * 1.6 * math.sin(math.radians(a)))
-        d.line([(sun_cx, sun_cy), (sun_cx + dx, sun_cy + dy)], fill=(255, 240, 150, 220), width=3)
+        d.line([(sun_cx, sun_cy), (sun_cx + dx, sun_cy + dy)],
+               fill=(255, 240, 150, 220), width=3)
 
     # panel
     pad = 18
@@ -117,11 +129,11 @@ def sprite_hvac(u_bidir: float, size: Tuple[int, int] = (200, 200)) -> ImageTk.P
     y0 = h - pad - bar_h
     try:
         d.rounded_rectangle([pad, y0, pad + bar_w, y0 + bar_h], radius=10, fill=(255, 255, 255, 60))
-        filled = int(bar_w * _clamp01(abs(u)))
+        filled = int(bar_w * abs(u))
         d.rounded_rectangle([pad, y0, pad + filled, y0 + bar_h], radius=10, fill=(255, 255, 255, 220))
     except Exception:
         d.rectangle([pad, y0, pad + bar_w, y0 + bar_h], fill=(255, 255, 255, 60))
-        filled = int(bar_w * _clamp01(abs(u)))
+        filled = int(bar_w * abs(u))
         d.rectangle([pad, y0, pad + filled, y0 + bar_h], fill=(255, 255, 255, 220))
     return ImageTk.PhotoImage(im)
 
@@ -169,8 +181,7 @@ def sprite_battery(soc01: float, size: Tuple[int, int] = (200, 200)) -> ImageTk.
     return ImageTk.PhotoImage(im)
 
 
-# ---------- NEW: House from PNG + time-of-day tint ----------
-@lru_cache(maxsize=256)
+# ---------- house sprite wrapper ----------
 def sprite_house_from_png(
     *,
     time_minute: int,
@@ -181,59 +192,54 @@ def sprite_house_from_png(
     with_sky: bool = True,
 ) -> ImageTk.PhotoImage:
     """
-    Render house.png with time-of-day tint (from render_house_png) and overlay a
-    status panel (bottom-left) plus Tin/Tout box (bottom-right). Returns a Tk PhotoImage.
+    Render the tinted house PNG via render_house_png(...), overlay Tin/Tout + lines,
+    and return a Tk PhotoImage.
     """
-    # Base image using PNG+tint runtime
-    im = render_house_png(time_minute, size=size, with_sky=with_sky, sharpen=True).copy()
+    im = render_house_png(
+        time_minute,
+        size=size,
+        with_sky=with_sky,
+        show_time=False,
+        sharpen=True,
+    ).copy()
+
     d = ImageDraw.Draw(im)
     W, H = im.size
+    f_head = _font_px(max(12, int(H * 0.045)))
+    f_line = _font_px(max(11, int(H * 0.040)))
 
-    f_title = _font(big=False)
-    f_body  = _font(big=False)
+    header = f"Tin {tin_c:.1f}°C   Tout {tout_c:.1f}°C"
 
-    # --- bottom-left multiline status ---
-    if lines:
-        # sizes
-        pad_x, pad_y = 10, 8
-        gap = 4
-        widths, heights = [], []
-        for s in lines:
-            tw, th = _text_size(d, str(s), f_body)
-            widths.append(tw); heights.append(th)
-        box_w = max(widths) + 2 * pad_x
-        box_h = sum(heights) + (len(lines) - 1) * gap + 2 * pad_y
+    # measure multi-line box
+    pad_x, pad_y = 10, 8
+    gap = 4
+    lines_list = [header] + list(lines)
+    widths, heights = [], []
+    for s in lines_list:
+        w, h = _text_size(d, s, f_head if s is header else f_line)
+        widths.append(w); heights.append(h)
 
-        bx0, by0 = 10, H - 10 - box_h
-        bx1, by1 = bx0 + box_w, by0 + box_h
-        try:
-            d.rounded_rectangle([bx0, by0, bx1, by1], radius=10, fill=(0, 0, 0, 90))
-        except Exception:
-            d.rectangle([bx0, by0, bx1, by1], fill=(0, 0, 0, 90))
+    box_w = max(widths) + 2 * pad_x
+    box_h = (sum(heights) + (len(lines_list) - 1) * gap) + 2 * pad_y
 
-        y = by0 + pad_y
-        for s, th in zip(lines, heights):
-            d.text((bx0 + pad_x, y), str(s), font=f_body, fill=(235, 235, 235, 230))
-            y += th + gap
+    # bottom-left placement
+    bx0 = 10
+    by0 = H - 10 - box_h
+    bx1 = bx0 + box_w
+    by1 = by0 + box_h
 
-    # --- bottom-right Tin/Tout box ---
-    labels = [f"Tin: {tin_c:.1f}°C", f"Tout: {tout_c:.1f}°C"]
-    sizes2 = [_text_size(d, lab, f_title) for lab in labels]
-    tw_max = max(tw for tw, _ in sizes2)
-    th_sum = sum(th for _, th in sizes2) + 6
-    pad = 12
-    bx_w = tw_max + 2 * pad
-    bx_h = th_sum + 2 * pad
-    bx_x1 = W - bx_w - pad
-    bx_y1 = H - bx_h - pad
+    # backdrop
     try:
-        d.rounded_rectangle([bx_x1, bx_y1, bx_x1 + bx_w, bx_y1 + bx_h], radius=10, fill=(0, 0, 0, 140))
+        d.rounded_rectangle([bx0, by0, bx1, by1], radius=10, fill=(0, 0, 0, 90))
     except Exception:
-        d.rectangle([bx_x1, bx_y1, bx_x1 + bx_w, bx_y1 + bx_h], fill=(0, 0, 0, 140))
+        d.rectangle([bx0, by0, bx1, by1], fill=(0, 0, 0, 90))
 
-    y2 = bx_y1 + pad
-    for (lab, (tw, th)) in zip(labels, sizes2):
-        d.text((bx_x1 + (bx_w - tw) // 2, y2), lab, font=f_title, fill=(255, 255, 255, 255))
-        y2 += th + 6
+    # draw lines
+    y = by0 + pad_y
+    d.text((bx0 + pad_x, y), header, fill=(245, 245, 245, 255), font=f_head)
+    y += heights[0] + gap
+    for i, s in enumerate(lines_list[1:], start=1):
+        d.text((bx0 + pad_x, y), s, fill=(235, 235, 235, 230), font=f_line)
+        y += heights[i] + gap
 
     return ImageTk.PhotoImage(im)

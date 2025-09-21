@@ -25,19 +25,15 @@ def _text_size(d: ImageDraw.ImageDraw, s: str, f) -> Tuple[int, int]:
         except Exception:
             return (len(s) * 7, 12)
 
-def _clamp(v: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, v))
-
-
 # ------- axes + mapping -------
-def _auto_minmax(vals: Sequence[float], pad_ratio: float = 0.08, fallback=(0.0, 1.0)) -> Tuple[float, float]:
+def _auto_minmax(vals: Sequence[float], pad_ratio: float = 0.08,
+                 fallback=(0.0, 1.0)) -> Tuple[float, float]:
     xs = [float(v) for v in vals if math.isfinite(v)]
     if not xs:
         return fallback
     lo, hi = min(xs), max(xs)
     if lo == hi:
-        lo -= 1.0
-        hi += 1.0
+        lo -= 1.0; hi += 1.0
     pad = (hi - lo) * pad_ratio
     return lo - pad, hi + pad
 
@@ -51,15 +47,22 @@ def _ymap(y: float, ymin: float, ymax: float, T: int, B: int) -> int:
     if ymax == ymin:
         return B
     t = (y - ymin) / (ymax - ymin)
-    return int(round(B - t * (B - T)))  # invert y (top-down)
+    return int(round(B - t * (B - T)))  # invert y
 
-def _draw_axes(d: ImageDraw.ImageDraw, rect: Tuple[int, int, int, int], *,
-               xticks: Sequence[float], xmin: float, xmax: float,
-               yticks: Sequence[float], ymin: float, ymax: float,
-               label_left: Optional[str] = None, label_right: Optional[str] = None):
+def _draw_axes(
+    d: ImageDraw.ImageDraw,
+    rect: Tuple[int, int, int, int],
+    *,
+    xticks: Sequence[float], xmin: float, xmax: float,
+    yticks: Sequence[float], ymin: float, ymax: float,
+    label_left: Optional[str] = None, label_right: Optional[str] = None,
+    draw_frame: bool = False,               # NEW
+    frame_color=(180, 180, 180, 255),
+    frame_width: int = 1
+):
     L, T, R, B = rect
-    # frame
-    d.rectangle([L, T, R, B], outline=(180, 180, 180, 255), width=1)
+    if draw_frame:
+        d.rectangle([L, T, R, B], outline=frame_color, width=frame_width)
     f_tick = _font(11)
     # x ticks
     for xv in xticks:
@@ -87,11 +90,9 @@ def _draw_axes(d: ImageDraw.ImageDraw, rect: Tuple[int, int, int, int], *,
 def _ticks_lin(lo: float, hi: float, step: float) -> List[float]:
     if step <= 0 or hi <= lo:
         return []
-    # start on a multiple of step
     start = math.ceil(lo / step) * step
     xs = []
     x = start
-    # small epsilon to avoid float rounding misses
     while x <= hi + 1e-9:
         xs.append(round(x, 6))
         x += step
@@ -107,48 +108,59 @@ def make_temp_chart_sprite(
     *,
     size: Tuple[int, int] = (860, 180),
     cursor_hour: Optional[float] = None,
+    margins: Tuple[int, int, int, int] = (16, 12, 16, 16),
+    outer_pad: Tuple[int, int, int, int] = (8, 8, 8, 8),
+    panel_fill=(255, 255, 255, 255),        # NEW
+    panel_outline=None,                     # NEW (set to (210,210,210,255) if you want it)
+    draw_axes_frame=False                   # NEW
 ) -> ImageTk.PhotoImage:
     W, H = size
-    im = Image.new("RGBA", (W, H), (255, 255, 255, 255))
+    im = Image.new("RGBA", (W, H), panel_fill)
     d = ImageDraw.Draw(im)
-    # plot rect
-    L, T, R, B = 50, 22, W - 12, H - 30
 
-    # x-range and ticks (hours)
+    # Panel
+    pL, pT, pR, pB = outer_pad
+    PL, PT, PR, PB = pL, pT, W - pR, H - pB
+    d.rectangle([PL, PT, PR, PB], outline=panel_outline, width=1, fill=panel_fill)
+
+    # Axes rect
+    mL, mT, mR, mB = margins
+    L, T, R, B = PL + mL, PT + mT, PR - mR, PB - mB
+    Li, Ti, Ri, Bi = L + 1, T + 1, R - 1, B - 1
+
     if not hours:
         return ImageTk.PhotoImage(im)
+
     xmin, xmax = float(hours[0]), float(hours[-1])
     xt = _ticks_lin(0.0, 24.0, 4.0) if (xmax - xmin) >= 12 else _ticks_lin(xmin, xmax, max(1.0, (xmax - xmin) / 6))
 
-    # y-range from comfort + data
     vals = list(tin_hist) + [comfort_L, comfort_U]
     ymin, ymax = _auto_minmax(vals, pad_ratio=0.15, fallback=(comfort_L - 2, comfort_U + 2))
     yt = _ticks_lin(math.floor(ymin), math.ceil(ymax), 2.0)
 
-    # comfort band
-    yL = _ymap(comfort_L, ymin, ymax, T, B)
-    yU = _ymap(comfort_U, ymin, ymax, T, B)
-    d.rectangle([L, yU, R, yL], fill=(120, 200, 120, 40), outline=None)
-    d.line([(L, yL), (R, yL)], fill=(80, 160, 80, 180), width=1)
-    d.line([(L, yU), (R, yU)], fill=(80, 160, 80, 180), width=1)
+    # Comfort band
+    yL = _ymap(comfort_L, ymin, ymax, Ti, Bi)
+    yU = _ymap(comfort_U, ymin, ymax, Ti, Bi)
+    d.rectangle([Li, yU, Ri, yL], fill=(120, 200, 120, 40))
+    d.line([(Li, yL), (Ri, yL)], fill=(80, 160, 80, 180), width=1)
+    d.line([(Li, yU), (Ri, yU)], fill=(80, 160, 80, 180), width=1)
 
     # Tin line
     if tin_hist:
-        xs = [_xmap(h, xmin, xmax, L, R) for h in hours[:len(tin_hist)]]
-        ys = [_ymap(v, ymin, ymax, T, B) for v in tin_hist]
+        xs = [_xmap(h, xmin, xmax, Li, Ri) for h in hours[:len(tin_hist)]]
+        ys = [_ymap(v, ymin, ymax, Ti, Bi) for v in tin_hist]
         for i in range(1, len(xs)):
-            d.line([(xs[i - 1], ys[i - 1]), (xs[i], ys[i])], fill=(30, 30, 30, 255), width=2)
+            d.line([(xs[i-1], ys[i-1]), (xs[i], ys[i])], fill=(30, 30, 30, 255), width=2)
 
-    # axes and ticks
     _draw_axes(d, (L, T, R, B),
                xticks=xt, xmin=xmin, xmax=xmax,
                yticks=yt, ymin=ymin, ymax=ymax,
-               label_left="Tin (°C)")
+               label_left="Tin (°C)",
+               draw_frame=draw_axes_frame)
 
-    # cursor
     if cursor_hour is not None:
-        cx = _xmap(cursor_hour, xmin, xmax, L, R)
-        d.line([(cx, T), (cx, B)], fill=(0, 0, 0, 160), width=1)
+        cx = _xmap(cursor_hour, xmin, xmax, Li, Ri)
+        d.line([(cx, Ti), (cx, Bi)], fill=(0, 0, 0, 140), width=1)
 
     return ImageTk.PhotoImage(im)
 
@@ -159,26 +171,34 @@ def make_price_chart_sprite(
     *,
     size: Tuple[int, int] = (860, 140),
     cursor_hour: Optional[float] = None,
+    margins: Tuple[int, int, int, int] = (16, 10, 16, 16),
+    outer_pad: Tuple[int, int, int, int] = (8, 8, 8, 8),
 ) -> ImageTk.PhotoImage:
     W, H = size
     im = Image.new("RGBA", (W, H), (255, 255, 255, 255))
     d = ImageDraw.Draw(im)
-    L, T, R, B = 50, 18, W - 12, H - 28
+
+    pL, pT, pR, pB = outer_pad
+    PL, PT, PR, PB = pL, pT, W - pR, H - pB
+    d.rectangle([PL, PT, PR, PB], outline=None, width=1, fill=(255, 255, 255, 255))
+
+    mL, mT, mR, mB = margins
+    L, T, R, B = PL + mL, PT + mT, PR - mR, PB - mB
+    Li, Ti, Ri, Bi = L + 1, T + 1, R - 1, B - 1
 
     if not hours:
         return ImageTk.PhotoImage(im)
+
     xmin, xmax = float(hours[0]), float(hours[-1])
     ymin, ymax = _auto_minmax(price, pad_ratio=0.12, fallback=(0.0, 1.0))
     xt = _ticks_lin(0.0, 24.0, 4.0)
-    # price ticks rounded to 0.05
     p_step = max(0.05, (ymax - ymin) / 5.0)
     p_step = round(p_step / 0.05) * 0.05
     yt = _ticks_lin(math.floor(ymin / p_step) * p_step, math.ceil(ymax / p_step) * p_step, p_step)
 
-    # price line
     if price:
-        xs = [_xmap(h, xmin, xmax, L, R) for h in hours]
-        ys = [_ymap(v, ymin, ymax, T, B) for v in price]
+        xs = [_xmap(h, xmin, xmax, Li, Ri) for h in hours]
+        ys = [_ymap(v, ymin, ymax, Ti, Bi) for v in price]
         for i in range(1, len(xs)):
             d.line([(xs[i - 1], ys[i - 1]), (xs[i], ys[i])], fill=(60, 120, 220, 255), width=2)
 
@@ -188,11 +208,10 @@ def make_price_chart_sprite(
                label_left="Price (€/kWh)")
 
     if cursor_hour is not None:
-        cx = _xmap(cursor_hour, xmin, xmax, L, R)
-        d.line([(cx, T), (cx, B)], fill=(0, 0, 0, 160), width=1)
+        cx = _xmap(cursor_hour, xmin, xmax, Li, Ri)
+        d.line([(cx, Ti), (cx, Bi)], fill=(0, 0, 0, 160), width=1)
 
     return ImageTk.PhotoImage(im)
-
 
 def make_weather_pv_chart_sprite(
     hours: Sequence[float],
@@ -201,62 +220,74 @@ def make_weather_pv_chart_sprite(
     *,
     size: Tuple[int, int] = (860, 180),
     cursor_hour: Optional[float] = None,
+    margins: Tuple[int, int, int, int] = (16, 12, 36, 16),  # extra right for PV ticks
+    outer_pad: Tuple[int, int, int, int] = (8, 8, 8, 8),
 ) -> ImageTk.PhotoImage:
     W, H = size
     im = Image.new("RGBA", (W, H), (255, 255, 255, 255))
     d = ImageDraw.Draw(im)
-    L, T, R, B = 50, 22, W - 50, H - 30  # leave room right for PV label
+
+    pL, pT, pR, pB = outer_pad
+    PL, PT, PR, PB = pL, pT, W - pR, H - pB
+    d.rectangle([PL, PT, PR, PB], outline=None, width=1, fill=(255, 255, 255, 255))
+
+    mL, mT, mR, mB = margins
+    L, T, R, B = PL + mL, PT + mT, PR - mR, PB - mB
+    Li, Ti, Ri, Bi = L + 1, T + 1, R - 1, B - 1
 
     if not hours:
         return ImageTk.PhotoImage(im)
+
     xmin, xmax = float(hours[0]), float(hours[-1])
 
     # left axis: Tout
     yLmin, yLmax = _auto_minmax(tout, pad_ratio=0.12, fallback=(-5.0, 30.0))
     ytL = _ticks_lin(math.floor(yLmin), math.ceil(yLmax), 5.0)
 
-    # right axis (PV)
+    # right axis: PV
     pvmax = max([0.0] + [float(v) for v in pv if math.isfinite(v)])
     yRmin, yRmax = 0.0, max(0.1, pvmax * 1.10)
     ytR = _ticks_lin(yRmin, yRmax, max(0.2, yRmax / 5.0))
 
     xt = _ticks_lin(0.0, 24.0, 4.0)
 
-    # PV area (right axis scaled into same pixel rect)
+    # PV area (inner rect)
     def ymapR(v: float) -> int:
-        return _ymap(v, yRmin, yRmax, T, B)
-    xs = [_xmap(h, xmin, xmax, L, R) for h in hours]
+        return _ymap(v, yRmin, yRmax, Ti, Bi)
+    xs = [_xmap(h, xmin, xmax, Li, Ri) for h in hours]
     ys_pv = [ymapR(v) for v in pv]
     if len(xs) >= 2:
-        poly = [(xs[0], B)] + list(zip(xs, ys_pv)) + [(xs[-1], B)]
+        poly = [(xs[0], Bi)] + list(zip(xs, ys_pv)) + [(xs[-1], Bi)]
         d.polygon(poly, fill=(255, 200, 100, 90))
 
-    # Tout line (left axis)
-    ys_t = [_ymap(v, yLmin, yLmax, T, B) for v in tout]
+    # Tout line (inner rect)
+    ys_t = [_ymap(v, yLmin, yLmax, Ti, Bi) for v in tout]
     for i in range(1, len(xs)):
         d.line([(xs[i - 1], ys_t[i - 1]), (xs[i], ys_t[i])], fill=(40, 40, 40, 255), width=2)
 
-    # axes (left y and bottom x)
+    # axes (left) on outer axes-rect
     _draw_axes(d, (L, T, R, B),
                xticks=xt, xmin=xmin, xmax=xmax,
                yticks=ytL, ymin=yLmin, ymax=yLmax,
                label_left="Tout (°C)", label_right=None)
 
-    # right y-axis ticks for PV
+    # Right y-axis for PV: ticks at outer R, y from inner rect so they line up
     f_tick = _font(11)
     for yv in ytR:
-        y = _ymap(yv, yRmin, yRmax, T, B)
+        y = _ymap(yv, yRmin, yRmax, Ti, Bi)
         d.line([(R, y), (R + 4, y)], fill=(150, 150, 150, 255), width=1)
         lab = f"{yv:g}"
         w, h = _text_size(d, lab, f_tick)
         d.text((R + 6, y - h // 2), lab, fill=(80, 80, 80, 255), font=f_tick)
+
     f_lbl = _font(12)
     lbl = "PV (per kWp)"
     w, h = _text_size(d, lbl, f_lbl)
     d.text((W - w - 8, T - h - 2), lbl, fill=(70, 70, 70, 255), font=f_lbl)
 
     if cursor_hour is not None:
-        cx = _xmap(cursor_hour, xmin, xmax, L, R)
-        d.line([(cx, T), (cx, B)], fill=(0, 0, 0, 160), width=1)
+        cx = _xmap(cursor_hour, xmin, xmax, Li, Ri)
+        d.line([(cx, Ti), (cx, Bi)], fill=(0, 0, 0, 160), width=1)
 
     return ImageTk.PhotoImage(im)
+
