@@ -1,8 +1,9 @@
 from __future__ import annotations
+
 import math
 from typing import Sequence, Tuple, Optional, List
-from PIL import Image, ImageDraw, ImageFont, ImageTk
 
+from PIL import Image, ImageDraw, ImageFont, ImageTk
 
 # ------- text + styling helpers -------
 def _font(size: int = 12):
@@ -133,10 +134,10 @@ def make_temp_chart_sprite(
 
     # Tin line
     if tin_hist:
-        xs = [ _xmap(h, xmin, xmax, L, R) for h in hours[:len(tin_hist)] ]
-        ys = [ _ymap(v, ymin, ymax, T, B) for v in tin_hist ]
+        xs = [_xmap(h, xmin, xmax, L, R) for h in hours[:len(tin_hist)]]
+        ys = [_ymap(v, ymin, ymax, T, B) for v in tin_hist]
         for i in range(1, len(xs)):
-            d.line([(xs[i-1], ys[i-1]), (xs[i], ys[i])], fill=(30, 30, 30, 255), width=2)
+            d.line([(xs[i - 1], ys[i - 1]), (xs[i], ys[i])], fill=(30, 30, 30, 255), width=2)
 
     # axes and ticks
     _draw_axes(d, (L, T, R, B),
@@ -176,10 +177,10 @@ def make_price_chart_sprite(
 
     # price line
     if price:
-        xs = [ _xmap(h, xmin, xmax, L, R) for h in hours ]
-        ys = [ _ymap(v, ymin, ymax, T, B) for v in price ]
+        xs = [_xmap(h, xmin, xmax, L, R) for h in hours]
+        ys = [_ymap(v, ymin, ymax, T, B) for v in price]
         for i in range(1, len(xs)):
-            d.line([(xs[i-1], ys[i-1]), (xs[i], ys[i])], fill=(60, 120, 220, 255), width=2)
+            d.line([(xs[i - 1], ys[i - 1]), (xs[i], ys[i])], fill=(60, 120, 220, 255), width=2)
 
     _draw_axes(d, (L, T, R, B),
                xticks=xt, xmin=xmin, xmax=xmax,
@@ -224,16 +225,16 @@ def make_weather_pv_chart_sprite(
     # PV area (right axis scaled into same pixel rect)
     def ymapR(v: float) -> int:
         return _ymap(v, yRmin, yRmax, T, B)
-    xs = [ _xmap(h, xmin, xmax, L, R) for h in hours ]
-    ys_pv = [ ymapR(v) for v in pv ]
+    xs = [_xmap(h, xmin, xmax, L, R) for h in hours]
+    ys_pv = [ymapR(v) for v in pv]
     if len(xs) >= 2:
         poly = [(xs[0], B)] + list(zip(xs, ys_pv)) + [(xs[-1], B)]
         d.polygon(poly, fill=(255, 200, 100, 90))
 
     # Tout line (left axis)
-    ys_t = [ _ymap(v, yLmin, yLmax, T, B) for v in tout ]
+    ys_t = [_ymap(v, yLmin, yLmax, T, B) for v in tout]
     for i in range(1, len(xs)):
-        d.line([(xs[i-1], ys_t[i-1]), (xs[i], ys_t[i])], fill=(40, 40, 40, 255), width=2)
+        d.line([(xs[i - 1], ys_t[i - 1]), (xs[i], ys_t[i])], fill=(40, 40, 40, 255), width=2)
 
     # axes (left y and bottom x)
     _draw_axes(d, (L, T, R, B),

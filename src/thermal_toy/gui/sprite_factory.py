@@ -1,12 +1,14 @@
-# src/thermal_toy/gui/sprite_factory.py
 from __future__ import annotations
 import math
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Tuple
+from typing import Tuple, Iterable
+
 from PIL import Image, ImageDraw, ImageFont, ImageTk
+
 from .assets import load_sprite  # already present
 from .assets import _candidate_dirs  # to help locate asset manually
+from .house_spline_runtime import render_house_png  # <-- NEW: use PNG+tint renderer
 
 
 # ---------- helpers ----------
@@ -45,6 +47,7 @@ def _text_size(draw: ImageDraw.ImageDraw, text: str, font) -> Tuple[int, int]:
 def _clamp01(x: float) -> float:
     return max(0.0, min(1.0, float(x)))
 
+
 # ---------- palette ----------
 @dataclass(frozen=True)
 class Palette:
@@ -56,6 +59,7 @@ class Palette:
     dark  = (60, 70, 100)
 
 PALETTE = Palette()
+
 
 # ---------- sprites ----------
 @lru_cache(maxsize=256)
@@ -88,6 +92,7 @@ def sprite_pv(on: bool, size: Tuple[int, int] = (200, 200)) -> ImageTk.PhotoImag
     d.text(((w - tw) // 2, int(h * 0.02)), text, fill=(255, 255, 255, 255), font=f_big)
     return ImageTk.PhotoImage(im)
 
+
 @lru_cache(maxsize=256)
 def sprite_hvac(u_bidir: float, size: Tuple[int, int] = (200, 200)) -> ImageTk.PhotoImage:
     u = max(-1.0, min(1.0, float(u_bidir)))
@@ -119,6 +124,7 @@ def sprite_hvac(u_bidir: float, size: Tuple[int, int] = (200, 200)) -> ImageTk.P
         filled = int(bar_w * _clamp01(abs(u)))
         d.rectangle([pad, y0, pad + filled, y0 + bar_h], fill=(255, 255, 255, 220))
     return ImageTk.PhotoImage(im)
+
 
 @lru_cache(maxsize=256)
 def sprite_battery(soc01: float, size: Tuple[int, int] = (200, 200)) -> ImageTk.PhotoImage:
@@ -162,62 +168,72 @@ def sprite_battery(soc01: float, size: Tuple[int, int] = (200, 200)) -> ImageTk.
     d.text((x0 + (bw - pw) // 2, y0 + (bh - ph) // 2), pct, fill=(0, 0, 0, 230), font=f)
     return ImageTk.PhotoImage(im)
 
-# src/thermal_toy/gui/sprite_factory.py
+
+# ---------- NEW: House from PNG + time-of-day tint ----------
 @lru_cache(maxsize=256)
-def sprite_house_with_temp(
-    sprite_name: str,
+def sprite_house_from_png(
+    *,
+    time_minute: int,
     tin_c: float,
     tout_c: float,
-    size: Tuple[int, int] = (460, 260),
-    lines: tuple | list | None = None,   # <- NEW
+    size: Tuple[int, int],
+    lines: Iterable[str] = (),
+    with_sky: bool = True,
 ) -> ImageTk.PhotoImage:
-    """Overlay status (top-left) and Tin/Tout (bottom-right) on house image."""
-    stem = sprite_name if sprite_name.lower().endswith(".png") else f"{sprite_name}.png"
-    sprite_path = None
-    for base in _candidate_dirs():
-        p = base / stem
-        if p.exists():
-            sprite_path = p
-            break
-    if sprite_path is None:
-        raise FileNotFoundError(f"Could not find sprite '{sprite_name}' in any asset directory.")
+    """
+    Render house.png with time-of-day tint (from render_house_png) and overlay a
+    status panel (bottom-left) plus Tin/Tout box (bottom-right). Returns a Tk PhotoImage.
+    """
+    # Base image using PNG+tint runtime
+    im = render_house_png(time_minute, size=size, with_sky=with_sky, sharpen=True).copy()
+    d = ImageDraw.Draw(im)
+    W, H = im.size
 
-    img = Image.open(sprite_path).convert("RGBA").resize(size)
-    draw = ImageDraw.Draw(img)
-    font = _font(False)
-    w, h = size
-    pad = 12
+    f_title = _font(big=False)
+    f_body  = _font(big=False)
 
-    # --- top-left multi-line overlay (NEW) ---
+    # --- bottom-left multiline status ---
     if lines:
-        # measure
-        maxw = 0; totalh = 0; gap = 4
-        sizes = []
+        # sizes
+        pad_x, pad_y = 10, 8
+        gap = 4
+        widths, heights = [], []
         for s in lines:
-            tw, th = _text_size(draw, str(s), font)
-            sizes.append((tw, th))
-            maxw = max(maxw, tw)
-            totalh += th + gap
-        totalh -= gap
-        box_w = maxw + 2*pad
-        box_h = totalh + 2*pad
-        draw.rectangle([pad, pad, pad + box_w, pad + box_h], fill=(0, 0, 0, 150))
-        y = pad + (box_h - 2*pad - totalh) // 2
-        for (s, (tw, th)) in zip(lines, sizes):
-            draw.text((pad + (box_w - 2*pad - tw)//2 + pad//2, y), str(s), font=font, fill=(255, 255, 255, 230))
+            tw, th = _text_size(d, str(s), f_body)
+            widths.append(tw); heights.append(th)
+        box_w = max(widths) + 2 * pad_x
+        box_h = sum(heights) + (len(lines) - 1) * gap + 2 * pad_y
+
+        bx0, by0 = 10, H - 10 - box_h
+        bx1, by1 = bx0 + box_w, by0 + box_h
+        try:
+            d.rounded_rectangle([bx0, by0, bx1, by1], radius=10, fill=(0, 0, 0, 90))
+        except Exception:
+            d.rectangle([bx0, by0, bx1, by1], fill=(0, 0, 0, 90))
+
+        y = by0 + pad_y
+        for s, th in zip(lines, heights):
+            d.text((bx0 + pad_x, y), str(s), font=f_body, fill=(235, 235, 235, 230))
             y += th + gap
 
-    # --- bottom-right Tin/Tout box (kept) ---
+    # --- bottom-right Tin/Tout box ---
     labels = [f"Tin: {tin_c:.1f}°C", f"Tout: {tout_c:.1f}°C"]
-    sizes2 = [_text_size(draw, lab, font) for lab in labels]
+    sizes2 = [_text_size(d, lab, f_title) for lab in labels]
     tw_max = max(tw for tw, _ in sizes2)
     th_sum = sum(th for _, th in sizes2) + 6
-    bx_w = tw_max + 2*pad; bx_h = th_sum + 2*pad
-    bx_x1 = w - bx_w - pad; bx_y1 = h - bx_h - pad
-    draw.rectangle([bx_x1, bx_y1, bx_x1 + bx_w, bx_y1 + bx_h], fill=(0, 0, 0, 140))
-    y = bx_y1 + pad
-    for (lab, (tw, th)) in zip(labels, sizes2):
-        draw.text((bx_x1 + (bx_w - tw)//2, y), lab, font=font, fill=(255, 255, 255, 255))
-        y += th + 6
+    pad = 12
+    bx_w = tw_max + 2 * pad
+    bx_h = th_sum + 2 * pad
+    bx_x1 = W - bx_w - pad
+    bx_y1 = H - bx_h - pad
+    try:
+        d.rounded_rectangle([bx_x1, bx_y1, bx_x1 + bx_w, bx_y1 + bx_h], radius=10, fill=(0, 0, 0, 140))
+    except Exception:
+        d.rectangle([bx_x1, bx_y1, bx_x1 + bx_w, bx_y1 + bx_h], fill=(0, 0, 0, 140))
 
-    return ImageTk.PhotoImage(img)
+    y2 = bx_y1 + pad
+    for (lab, (tw, th)) in zip(labels, sizes2):
+        d.text((bx_x1 + (bx_w - tw) // 2, y2), lab, font=f_title, fill=(255, 255, 255, 255))
+        y2 += th + 6
+
+    return ImageTk.PhotoImage(im)

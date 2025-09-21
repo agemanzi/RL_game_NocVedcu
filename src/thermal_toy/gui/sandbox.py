@@ -9,7 +9,9 @@ from typing import Optional
 import pandas as pd
 
 from ..runtime import GameSession
-from .sprite_factory import sprite_hvac, sprite_pv, sprite_battery, sprite_house_with_temp
+from .sprite_factory import sprite_hvac, sprite_pv, sprite_battery, sprite_house_from_png
+
+
 from .chart_sprites import (
     make_temp_chart_sprite,
     make_price_chart_sprite,
@@ -84,85 +86,161 @@ class SandboxWindow(tk.Toplevel):
 
         self._build()
         self._reset()
-
     # ---------- UI ----------
     def _build(self):
         root = ttk.Frame(self, padding=12)
         root.pack(fill="both", expand=True)
 
-        # 2×2 grid (no scrolling)
+        # Top-level 3-column grid:
+        #  col0 = House + Devices + Controls
+        #  col1 = Outputs (placeholders)
+        #  col2 = Charts
         grid = ttk.Frame(root)
         grid.pack(side="top", fill="both", expand=True)
 
-        for c in (0, 1):
+        for c in (0, 1, 2):
             grid.columnconfigure(c, weight=1, uniform="cols")
-        for r in (0, 1):
-            grid.rowconfigure(r, weight=1, uniform="rows")
+        grid.rowconfigure(0, weight=1)
 
-        # Q1 (row0,col0): House with overlay
-        q1 = ttk.Frame(grid)
-        q1.grid(row=0, column=0, sticky="nsew", padx=(0, 8), pady=(0, 8))
-        self.house_label = ttk.Label(q1)
-        self.house_label.pack(fill="both", expand=True)
+        # =========================
+        # LEFT COLUMN: House → Devices → Controls
+        # =========================
+        left = tk.LabelFrame(grid, text="Simulation", relief="groove", borderwidth=2, padx=6, pady=6)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 8), pady=0)
 
-        # Q2 (row0,col1): Charts notebook (3 tabs)
-        q2 = ttk.Frame(grid)
-        q2.grid(row=0, column=1, sticky="nsew", padx=(8, 0), pady=(0, 8))
-        self.nb = ttk.Notebook(q2)
-        self.nb.pack(fill="both", expand=True)
+        left.columnconfigure(0, weight=1)
+        # 3 stacked sections; adjust weights to taste
+        left.rowconfigure(0, weight=3, uniform="leftcol")  # House
+        left.rowconfigure(1, weight=0)                    # Sep
+        left.rowconfigure(2, weight=2, uniform="leftcol")  # Devices
+        left.rowconfigure(3, weight=0)                    # Sep
+        left.rowconfigure(4, weight=2, uniform="leftcol")  # Controls
 
-        tab_temp = ttk.Frame(self.nb);  self.nb.add(tab_temp, text="Temp")
-        tab_price = ttk.Frame(self.nb); self.nb.add(tab_price, text="Price")
-        tab_weather = ttk.Frame(self.nb); self.nb.add(tab_weather, text="Weather + PV")
+        # --- House ---
+        q_house = ttk.Frame(left)
+        q_house.grid(row=0, column=0, sticky="nsew")
+        self.house_label = ttk.Label(q_house)
+        self.house_label.pack(fill="both", expand=True, pady=(0, 6))
 
-        self.chartA_label = ttk.Label(tab_temp);    self.chartA_label.pack(fill="x", pady=6)
-        self.chartB_label = ttk.Label(tab_price);   self.chartB_label.pack(fill="x", pady=6)
-        self.chartC_label = ttk.Label(tab_weather); self.chartC_label.pack(fill="x", pady=6)
+        ttk.Separator(left, orient="horizontal").grid(row=1, column=0, sticky="ew", pady=6)
 
-        # Q3 (row1,col0): Device badges
-        q3 = ttk.Frame(grid)
-        q3.grid(row=1, column=0, sticky="nsew", padx=(0, 8), pady=(8, 0))
-        badges = ttk.Frame(q3); badges.pack(pady=6)
+        # --- Devices (badges) ---
+        q_devices = ttk.Frame(left)
+        q_devices.grid(row=2, column=0, sticky="nsew")
+        badges = ttk.Frame(q_devices)
+        badges.pack(pady=6)
         self.hvac_label = ttk.Label(badges);  self.hvac_label.grid(row=0, column=0, padx=8, pady=6)
         self.pv_label   = ttk.Label(badges);  self.pv_label.grid(row=0, column=1, padx=8, pady=6)
         self.batt_label = ttk.Label(badges);  self.batt_label.grid(row=0, column=2, padx=8, pady=6)
 
-        # Q4 (row1,col1): Controls
-        q4 = ttk.Frame(grid)
-        q4.grid(row=1, column=1, sticky="nsew", padx=(8, 0), pady=(8, 0))
+        ttk.Separator(left, orient="horizontal").grid(row=3, column=0, sticky="ew", pady=6)
 
-        controls = ttk.Frame(q4); controls.pack(anchor="n", pady=6)
+        # --- Controls (same width as House) ---
+        q_controls = ttk.Frame(left)
+        q_controls.grid(row=4, column=0, sticky="nsew")
+
+        controls = ttk.Frame(q_controls)
+        controls.pack(anchor="n", pady=6, fill="x")
+
+        # state vars
         self.action_var = tk.DoubleVar(value=0.0)   # HVAC [-1, 1]
         self.pv_on_var  = tk.BooleanVar(value=False)
         self.soc_var    = tk.DoubleVar(value=0.5)   # Battery [0, 1]
 
         r = 0
         ttk.Label(controls, text="HVAC u").grid(row=r, column=0, sticky="w")
-        ttk.Scale(controls, from_=-1.0, to=1.0, variable=self.action_var, length=320,
-                  orient="horizontal", command=lambda *_: self._refresh_badges()
+        ttk.Scale(
+            controls, from_=-1.0, to=1.0, variable=self.action_var, length=320,
+            orient="horizontal", command=lambda *_: self._refresh_badges()
         ).grid(row=r, column=1, columnspan=2, sticky="ew"); r += 1
 
-        ttk.Checkbutton(controls, text="PV ON", variable=self.pv_on_var,
-                        command=self._refresh_badges).grid(row=r, column=1, sticky="w"); r += 1
+        ttk.Checkbutton(
+            controls, text="PV ON", variable=self.pv_on_var,
+            command=self._refresh_badges
+        ).grid(row=r, column=1, sticky="w"); r += 1
 
         ttk.Label(controls, text="Battery SOC").grid(row=r, column=0, sticky="w")
-        ttk.Scale(controls, from_=0.0, to=1.0, variable=self.soc_var, length=320,
-                  orient="horizontal", command=lambda *_: self._refresh_badges()
+        ttk.Scale(
+            controls, from_=0.0, to=1.0, variable=self.soc_var, length=320,
+            orient="horizontal", command=lambda *_: self._refresh_badges()
         ).grid(row=r, column=1, columnspan=2, sticky="ew"); r += 1
 
-        ttk.Button(controls, text="Step",  command=self._step,  width=12).grid(row=r, column=0, padx=4, pady=(6, 0))
+        ttk.Button(controls, text="Step", command=self._step, width=12)\
+            .grid(row=r, column=0, padx=4, pady=(6, 0))
+
+        # create play_btn before _reset() runs
         self.play_btn = ttk.Button(controls, text="▶ Play", command=self._toggle_play, width=12)
         self.play_btn.grid(row=r, column=1, padx=4, pady=(6, 0))
-        ttk.Button(controls, text="Reset", command=self._reset, width=12).grid(row=r, column=2, padx=4, pady=(6, 0))
 
-        # status line under grid (single line; still no scroll)
+        ttk.Button(controls, text="Reset", command=self._reset, width=12)\
+            .grid(row=r, column=2, padx=4, pady=(6, 0))
+
+        controls.columnconfigure(1, weight=1)  # sliders stretch
+
+        # =========================
+        # MIDDLE COLUMN: Outputs (placeholders)
+        # =========================
+        mid = tk.LabelFrame(grid, text="Outputs", relief="groove", borderwidth=2, padx=6, pady=6)
+        mid.grid(row=0, column=1, sticky="nsew", padx=8, pady=0)
+        mid.columnconfigure(0, weight=1)
+        # 3 rows for future plots
+        for rr in (0, 1, 2):
+            mid.rowconfigure(rr, weight=1, uniform="midrows")
+
+        def _out_row(parent, rix: int, title: str, attr: str):
+            row = tk.LabelFrame(parent, text=title, relief="ridge", borderwidth=1, padx=6, pady=6)
+            row.grid(row=rix, column=0, sticky="nsew", pady=(0 if rix == 0 else 8, 0))
+            placeholder = ttk.Label(row, text="(plot placeholder)", relief="sunken", anchor="center")
+            placeholder.pack(fill="both", expand=True, ipady=12)
+            setattr(self, attr, placeholder)
+
+        _out_row(mid, 0, "HVAC heat", "out_hvac_label")
+        _out_row(mid, 1, "PV generation", "out_pv_label")
+        _out_row(mid, 2, "Battery charge / discharge", "out_batt_label")
+
+        # =========================
+        # RIGHT COLUMN: Charts (existing)
+        # =========================
+        right = tk.LabelFrame(grid, text="Charts", relief="groove", borderwidth=2, padx=6, pady=6)
+        right.grid(row=0, column=2, sticky="nsew", padx=(8, 0), pady=0)
+
+        charts = ttk.Frame(right)
+        charts.pack(fill="both", expand=True)
+        charts.columnconfigure(0, weight=1)
+        for rr in (0, 1, 2):
+            charts.rowconfigure(rr, weight=1, uniform="chartrows")
+
+        # Temp
+        temp_wrap = ttk.Frame(charts)
+        temp_wrap.grid(row=0, column=0, sticky="nsew", pady=(0, 6))
+        ttk.Label(temp_wrap, text="Temp").pack(anchor="w", pady=(0, 4))
+        self.chartA_label = ttk.Label(temp_wrap)
+        self.chartA_label.pack(fill="both", expand=True)
+
+        # Price
+        price_wrap = ttk.Frame(charts)
+        price_wrap.grid(row=1, column=0, sticky="nsew", pady=6)
+        ttk.Label(price_wrap, text="Price").pack(anchor="w", pady=(0, 4))
+        self.chartB_label = ttk.Label(price_wrap)
+        self.chartB_label.pack(fill="both", expand=True)
+
+        # Weather + PV
+        weather_wrap = ttk.Frame(charts)
+        weather_wrap.grid(row=2, column=0, sticky="nsew", pady=(6, 0))
+        ttk.Label(weather_wrap, text="Weather + PV").pack(anchor="w", pady=(0, 4))
+        self.chartC_label = ttk.Label(weather_wrap)
+        self.chartC_label.pack(fill="both", expand=True)
+
+        # Status line
         self.status = ttk.Label(root, text="Ready.", anchor="w")
         self.status.pack(fill="x", pady=(8, 0))
 
-        # shortcuts
+        # Shortcuts
         self.bind("<space>",  lambda e: self._toggle_play())
         self.bind("<Return>", lambda e: self._step())
         self.bind("<Escape>", lambda e: self._on_close())
+
+
 
     # ---------- Session control ----------
     def _reset(self):
@@ -213,7 +291,9 @@ class SandboxWindow(tk.Toplevel):
     def _refresh_house(self):
         cursor_h = self._k * self.dt
         hour_mod = cursor_h % 24.0
-        bg_name  = time_of_day_sprite(hour_mod)
+
+        # NEW: minutes since midnight for current frame
+        time_minute = int(round(hour_mod * 60.0))
 
         day_idx = int(self.days_col[min(self._k, self.T - 1)])
         tin  = (self._tin_hist[-1] if self._tin_hist else float(self._last_info.get("Tin_c", 21.0)))
@@ -231,9 +311,43 @@ class SandboxWindow(tk.Toplevel):
             f"Step  €: energy {step_cost:.3f}   comfort {step_penalty:.3f}   reward {step_reward:.3f}",
             f"Total €: energy {cum_cost:.2f}    comfort {cum_penalty:.2f}    reward {cum_reward:.2f}",
         ]
-        house_img = sprite_house_with_temp(bg_name, tin_c=tin, tout_c=tout, size=self.HOUSE_SIZE, lines=tuple(lines))
+
+        # NEW: use the PNG+tint house renderer with your overlay lines
+        house_img = sprite_house_from_png(
+            time_minute=time_minute,
+            tin_c=tin,
+            tout_c=tout,
+            size=self.HOUSE_SIZE,
+            lines=tuple(lines),
+            with_sky=True,
+        )
+
         self.house_label.configure(image=house_img)
         self.house_label.image = house_img
+    # def _refresh_house(self):
+    #     cursor_h = self._k * self.dt
+    #     hour_mod = cursor_h % 24.0
+    #     bg_name  = time_of_day_sprite(hour_mod)
+
+    #     day_idx = int(self.days_col[min(self._k, self.T - 1)])
+    #     tin  = (self._tin_hist[-1] if self._tin_hist else float(self._last_info.get("Tin_c", 21.0)))
+    #     tout = float(self.tout[min(self._k, self.T - 1)])
+
+    #     step_cost     = float(self._last_info.get("cost_eur_step", 0.0))
+    #     step_penalty  = float(self._last_info.get("comfort_penalty_eur_step", 0.0))
+    #     step_reward   = float(self._last_info.get("reward", 0.0))
+    #     cum_cost      = float(self._last_info.get("cum_energy_cost_eur", 0.0))
+    #     cum_penalty   = float(self._last_info.get("cum_comfort_penalty_eur", 0.0))
+    #     cum_reward    = float(self._last_info.get("cum_reward", 0.0))
+
+    #     lines = [
+    #         f"Day {day_idx}   t {self._k}/{self.T}   hour {hour_mod:04.2f}",
+    #         f"Step  €: energy {step_cost:.3f}   comfort {step_penalty:.3f}   reward {step_reward:.3f}",
+    #         f"Total €: energy {cum_cost:.2f}    comfort {cum_penalty:.2f}    reward {cum_reward:.2f}",
+    #     ]
+    #     house_img = sprite_house_with_temp(bg_name, tin_c=tin, tout_c=tout, size=self.HOUSE_SIZE, lines=tuple(lines))
+    #     self.house_label.configure(image=house_img)
+    #     self.house_label.image = house_img
 
     def _refresh_badges(self):
         self.hvac_img  = sprite_hvac(float(self.action_var.get()), size=(220, 220))
